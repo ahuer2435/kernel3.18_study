@@ -1,0 +1,5 @@
+config CUSTOM_KERNEL_CAPSENSOR
+	bool "CUSTOM_KERNEL_CAPSENSOR"
+    default n
+	help
+	  Kernel space activity sensor driver.
