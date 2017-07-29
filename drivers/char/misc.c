@@ -53,7 +53,12 @@
 /*
  * Head entry for the doubly linked miscdevice list
  */
+ //定义一个双向链表头，只包含头尾指针，不含数据。
+ //相当于基类，用于其他结构继承，以此可以用链表方式访问其他结构，
+ //是一种面向对象思想。
 static LIST_HEAD(misc_list);
+
+// 定义一个互斥锁，初始状态为未锁定。
 static DEFINE_MUTEX(misc_mtx);
 
 /*
@@ -109,15 +114,21 @@ static const struct file_operations misc_proc_fops = {
 };
 #endif
 
+/*
+* 输入-- inode 和file指针。
+* 输出-- 通过inode 获取次设备号，使用次设备号和内核链表获取相应的misc 结构，
+* 然后获取其中的操作指针，将misc 设备和操作指针赋给filp 结构中相应的域，然后调用相应的open函数。
+*/
 static int misc_open(struct inode * inode, struct file * file)
 {
-	int minor = iminor(inode);
+	int minor = iminor(inode);		//获取次设备号。
 	struct miscdevice *c;
 	int err = -ENODEV;
 	const struct file_operations *new_fops = NULL;
 
 	mutex_lock(&misc_mtx);
-	
+
+	//获取次设备号对应的底层文件操作指针。
 	list_for_each_entry(c, &misc_list, list) {
 		if (c->minor == minor) {
 			new_fops = fops_get(c->fops);		
@@ -127,9 +138,10 @@ static int misc_open(struct inode * inode, struct file * file)
 		
 	if (!new_fops) {
 		mutex_unlock(&misc_mtx);
+		//如果指针获取失败，加载次设备号对应的模块。
 		request_module("char-major-%d-%d", MISC_MAJOR, minor);
 		mutex_lock(&misc_mtx);
-
+		//更新次设备号对应操作指针。
 		list_for_each_entry(c, &misc_list, list) {
 			if (c->minor == minor) {
 				new_fops = fops_get(c->fops);
@@ -141,7 +153,10 @@ static int misc_open(struct inode * inode, struct file * file)
 	}
 
 	err = 0;
+	//file对应主设备号，这一步更新filp结构中的操作指针，使其指向次设备号对应的操作指针。
 	replace_fops(file, new_fops);
+	//如果次设备号对应设备的open函数不为空，则将次设备号对应的misc 结构赋值到file 结构中，
+	// 并调用相应的open函数。
 	if (file->f_op->open) {
 		file->private_data = c;
 		err = file->f_op->open(inode,file);
@@ -174,16 +189,22 @@ static const struct file_operations misc_fops = {
  *	A zero is returned on success and a negative errno code for
  *	failure.
  */
- 
+ /*
+ * 输入-- miscdevice 设备结构。
+ * 作用-- (1) 初始化参数misc 结构变量。
+ * 		     (2) 确定次设备号，并基于设备模型 创建设备文件。
+ * 		     (3) 将设置好的misc 结构加入内核链表misc_list。
+*/
 int misc_register(struct miscdevice * misc)
 {
 	dev_t dev;
 	int err = 0;
 
-	INIT_LIST_HEAD(&misc->list);
+	INIT_LIST_HEAD(&misc->list);		//初始化list 节点。
 
-	mutex_lock(&misc_mtx);
-
+	mutex_lock(&misc_mtx);				//上锁。
+	
+	//动态分配此设备号或者检查指定的此设备号是否已经使用。
 	if (misc->minor == MISC_DYNAMIC_MINOR) {
 		int i = find_first_zero_bit(misc_minors, DYNAMIC_MINORS);
 		if (i >= DYNAMIC_MINORS) {
@@ -203,8 +224,11 @@ int misc_register(struct miscdevice * misc)
 		}
 	}
 
+	//计算设备号
 	dev = MKDEV(MISC_MAJOR, misc->minor);
 
+	//在/sys/class/misc/ 下创建设备文件。使用到了misc 结构中的this_device 和parent 指针，以及
+	// Linux 统一设备模型。
 	misc->this_device = device_create(misc_class, misc->parent, dev,
 					  misc, "%s", misc->name);
 	if (IS_ERR(misc->this_device)) {
@@ -219,6 +243,8 @@ int misc_register(struct miscdevice * misc)
 	 * Add it to the front, so that later devices can "override"
 	 * earlier defaults
 	 */
+	 //将这个misc 设备加入内核维护的misc_list 链表中。
+	 //这个链表头是上面static 声明的misc_list
 	list_add(&misc->list, &misc_list);
  out:
 	mutex_unlock(&misc_mtx);
@@ -234,7 +260,12 @@ int misc_register(struct miscdevice * misc)
  *	is indicated by a zero return, a negative errno code
  *	indicates an error.
  */
-
+/*
+* 输入-- misc 结构
+* 功能--(1) 从内核链表misc_list 中删除此misc 结构。
+* 		    (2) 删除设备文件。
+		    (3) 注销次设备号。
+*/
 int misc_deregister(struct miscdevice *misc)
 {
 	int i = DYNAMIC_MINORS - misc->minor - 1;
@@ -265,6 +296,11 @@ static char *misc_devnode(struct device *dev, umode_t *mode)
 	return NULL;
 }
 
+/*
+* 功能-- 创建设备文件或者misc 类目录。
+			使用字符设备接口注册misc 设备。
+			主设备号为10.
+*/
 static int __init misc_init(void)
 {
 	int err;
@@ -290,4 +326,8 @@ fail_remove:
 	remove_proc_entry("misc", NULL);
 	return err;
 }
+
+/*
+* 向内核注册misc 子系统。
+*/
 subsys_initcall(misc_init);

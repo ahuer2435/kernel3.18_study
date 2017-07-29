@@ -58,7 +58,7 @@ struct miscdevice  {
 	const char *name;
 	const struct file_operations *fops;
 	struct list_head list;
-	struct device *parent;
+	struct device *parent;			//用到了统一设备模型。
 	struct device *this_device;
 	const char *nodename;
 	umode_t mode;
